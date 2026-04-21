@@ -1,1 +1,59 @@
-# Phase 3 — implement critic agent
+import os
+from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from graph.state import ResearchState
+from tools.cross_reference import find_contradictions
+
+load_dotenv()
+
+_llm = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash",
+    google_api_key=os.getenv("GEMINI_API_KEY"),
+    temperature=0.2,
+)
+
+_SYSTEM = """\
+You are a critical research evaluator. Given a query and its extracted facts, assess:
+1. Whether facts are specific and well-supported (not vague)
+2. Whether they collectively answer the original query
+3. Whether any contradictions or gaps exist
+
+End your evaluation with exactly one of these verdicts on its own line:
+VERDICT: GOOD   — quality is sufficient to write a report
+VERDICT: POOR   — significant gaps, contradictions, or missing coverage"""
+
+
+def run_critic(state: ResearchState) -> dict:
+    facts = state["extracted_facts"]
+    errors = list(state.get("errors", []))
+
+    contradictions = find_contradictions(facts)
+    contradiction_text = ""
+    if contradictions:
+        pairs = "\n".join(f"  • '{a}' vs '{b}'" for a, b in contradictions[:3])
+        contradiction_text = f"\n\nDetected potential contradictions:\n{pairs}"
+
+    facts_text = "\n".join(f"{i + 1}. {f}" for i, f in enumerate(facts))
+    prompt = (
+        f"Original query: {state['query']}\n\n"
+        f"Extracted facts:\n{facts_text}"
+        f"{contradiction_text}"
+    )
+
+    try:
+        response = _llm.invoke([
+            SystemMessage(content=_SYSTEM),
+            HumanMessage(content=prompt),
+        ])
+        critique = response.content.strip()
+    except Exception as e:
+        errors.append(f"Critic failed: {e}")
+        critique = "VERDICT: GOOD"  # graceful degradation
+
+    return {
+        "critique": critique,
+        "errors": errors,
+        "current_step": "critic_done",
+    }
