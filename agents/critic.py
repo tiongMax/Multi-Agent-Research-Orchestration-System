@@ -9,7 +9,7 @@ from tools.cross_reference import find_contradictions
 load_dotenv()
 
 _llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
+    model="gemini-3-flash-preview",
     google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.2,
 )
@@ -23,6 +23,12 @@ You are a critical research evaluator. Given a query and its extracted facts, as
 End your evaluation with exactly one of these verdicts on its own line:
 VERDICT: GOOD   — quality is sufficient to write a report
 VERDICT: POOR   — significant gaps, contradictions, or missing coverage"""
+
+
+def _text(content) -> str:
+    if isinstance(content, list):
+        return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
+    return content
 
 
 def run_critic(state: ResearchState) -> dict:
@@ -47,7 +53,7 @@ def run_critic(state: ResearchState) -> dict:
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=prompt),
         ])
-        critique = response.content.strip()
+        critique = _text(response.content).strip()
     except Exception as e:
         errors.append(f"Critic failed: {e}")
         critique = "VERDICT: GOOD"  # graceful degradation
