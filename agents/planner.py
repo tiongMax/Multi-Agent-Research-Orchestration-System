@@ -9,7 +9,7 @@ from graph.state import ResearchState
 load_dotenv()
 
 _llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
+    model="gemini-3-flash-preview",
     google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.3,
 )
@@ -20,6 +20,12 @@ focused sub-questions that together would fully answer the original query.
 Return ONLY a numbered list of sub-questions — no preamble, no explanation."""
 
 
+def _text(content) -> str:
+    if isinstance(content, list):
+        return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
+    return content
+
+
 def run_planner(state: ResearchState) -> dict:
     response = _llm.invoke([
         SystemMessage(content=_SYSTEM),
@@ -27,7 +33,7 @@ def run_planner(state: ResearchState) -> dict:
     ])
 
     sub_questions = []
-    for line in response.content.strip().splitlines():
+    for line in _text(response.content).strip().splitlines():
         line = line.strip()
         cleaned = re.sub(r"^\d+[.)]\s*", "", line)
         if cleaned:

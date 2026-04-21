@@ -9,7 +9,7 @@ from graph.state import ResearchState
 load_dotenv()
 
 _llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
+    model="gemini-3-flash-preview",
     google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.1,
 )
@@ -25,6 +25,12 @@ Return ONLY a numbered list of facts, one per line. No preamble."""
 
 _MAX_CONTENT_CHARS = 1500
 _MAX_SOURCES = 3
+
+
+def _text(content) -> str:
+    if isinstance(content, list):
+        return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
+    return content
 
 
 def run_extractor(state: ResearchState) -> dict:
@@ -55,7 +61,7 @@ def run_extractor(state: ResearchState) -> dict:
                 SystemMessage(content=_SYSTEM),
                 HumanMessage(content=prompt),
             ])
-            for line in response.content.strip().splitlines():
+            for line in _text(response.content).strip().splitlines():
                 fact = re.sub(r"^\d+[.)]\s*", "", line.strip())
                 if fact:
                     all_facts.append(fact)
