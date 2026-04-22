@@ -12,31 +12,137 @@ type AgentEvent = {
   report?: string;
 };
 
-const AGENT_LABELS: Record<string, string> = {
-  planner: "Planner",
-  memory_retrieve: "Memory",
-  researcher: "Researcher",
-  extractor: "Extractor",
-  critic: "Critic",
-  rework: "Rework",
-  writer: "Writer",
-  memory_save: "Memory Save",
-  complete: "Complete",
+type Step = {
+  agent: string;
+  status: string;
+  done: boolean;
 };
 
-function AgentStep({ event, isLatest }: { event: AgentEvent; isLatest: boolean }) {
-  const label = AGENT_LABELS[event.agent] ?? event.agent;
-  const isDone = !isLatest;
+const AGENT_META: Record<string, { label: string; description: string }> = {
+  planner: {
+    label: "Planning",
+    description: "Breaking your question into focused research areas",
+  },
+  memory_retrieve: {
+    label: "Checking knowledge base",
+    description: "Looking for relevant information from past research",
+  },
+  researcher: {
+    label: "Searching the web",
+    description: "Gathering sources across all research areas",
+  },
+  extractor: {
+    label: "Analyzing sources",
+    description: "Extracting the most relevant facts and insights",
+  },
+  critic: {
+    label: "Reviewing research",
+    description: "Checking that the research is thorough and accurate",
+  },
+  rework: {
+    label: "Deepening research",
+    description: "Going deeper to find more comprehensive information",
+  },
+  writer: {
+    label: "Writing report",
+    description: "Putting everything together into a clear report",
+  },
+  memory_save: {
+    label: "Wrapping up",
+    description: "Saving this research for future reference",
+  },
+};
+
+function toUserStatus(agent: string, raw: string): string {
+  const num = raw.match(/\d+/);
+  const n = num ? parseInt(num[0]) : null;
+
+  if (agent === "planner" && n !== null)
+    return `Identified ${n} research ${n === 1 ? "angle" : "angles"}`;
+  if (agent === "memory_retrieve")
+    return raw.includes("No memory") ? "No prior research found" : "Found relevant prior research";
+  if (agent === "researcher" && n !== null)
+    return `Gathered ${n} ${n === 1 ? "source" : "sources"}`;
+  if (agent === "extractor" && n !== null)
+    return `Found ${n} key ${n === 1 ? "insight" : "insights"}`;
+  if (agent === "critic")
+    return raw.includes("GOOD") ? "Research looks comprehensive" : "Needs more depth";
+  if (agent === "rework" && n !== null)
+    return `Deepening search, pass ${n}`;
+  if (agent === "writer") return "Assembling your report";
+  if (agent === "memory_save") return "Done";
+  return "";
+}
+
+function CheckIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+function StepItem({
+  step,
+  isActive,
+  isLast,
+}: {
+  step: Step;
+  isActive: boolean;
+  isLast: boolean;
+}) {
+  const meta = AGENT_META[step.agent];
+  if (!meta) return null;
 
   return (
-    <div className="flex items-start gap-3">
-      <div className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold
-        ${isDone ? "bg-green-600 text-white" : "bg-blue-500 text-white animate-pulse"}`}>
-        {isDone ? "✓" : "…"}
+    <div className="flex items-start gap-4">
+      {/* Icon + connector line */}
+      <div className="flex flex-col items-center flex-shrink-0">
+        <div
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors duration-300
+            ${step.done
+              ? "bg-emerald-600 text-white"
+              : isActive
+              ? "bg-blue-500 text-white"
+              : "bg-gray-800 border border-gray-700 text-gray-500"
+            }`}
+        >
+          {step.done ? (
+            <CheckIcon />
+          ) : isActive ? (
+            <span className="block w-2.5 h-2.5 rounded-full bg-white animate-ping" />
+          ) : (
+            <span className="block w-2 h-2 rounded-full bg-gray-600" />
+          )}
+        </div>
+        {!isLast && (
+          <div
+            className={`w-0.5 min-h-[24px] mt-1 mb-1 transition-colors duration-500
+              ${step.done ? "bg-emerald-800" : "bg-gray-800"}`}
+          />
+        )}
       </div>
-      <div>
-        <span className="text-sm font-medium text-gray-200">{label}</span>
-        <span className="text-sm text-gray-400 ml-2">{event.status}</span>
+
+      {/* Text */}
+      <div className={`pb-6 min-w-0 transition-opacity duration-300 ${!isActive && !step.done ? "opacity-35" : ""}`}>
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span
+            className={`text-sm font-semibold ${
+              step.done ? "text-gray-200" : isActive ? "text-white" : "text-gray-500"
+            }`}
+          >
+            {meta.label}
+          </span>
+          {step.done && step.status && (
+            <span className="text-xs text-emerald-400">{step.status}</span>
+          )}
+          {isActive && (
+            <span className="text-xs text-blue-400 animate-pulse">In progress…</span>
+          )}
+        </div>
+        <p className={`text-xs mt-0.5 leading-relaxed ${isActive ? "text-gray-300" : "text-gray-500"}`}>
+          {meta.description}
+        </p>
       </div>
     </div>
   );
@@ -46,7 +152,7 @@ function ResearchContent() {
   const params = useSearchParams();
   const query = params.get("q") ?? "";
 
-  const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [steps, setSteps] = useState<Step[]>([]);
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -68,8 +174,8 @@ function ResearchContent() {
           signal: controller.signal,
         });
 
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        if (!res.body) throw new Error("No response body");
+        if (!res.ok) throw new Error("The research service is currently unavailable. Please try again.");
+        if (!res.body) throw new Error("No response received from the server.");
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -81,6 +187,7 @@ function ResearchContent() {
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
+
           for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
             try {
@@ -88,8 +195,21 @@ function ResearchContent() {
               if (ev.agent === "complete") {
                 setReport(ev.report ?? "");
                 setRunning(false);
-              } else {
-                setEvents((prev) => [...prev, ev]);
+                setSteps((prev) =>
+                  prev.map((s, i) => (i === prev.length - 1 ? { ...s, done: true } : s))
+                );
+              } else if (AGENT_META[ev.agent]) {
+                setSteps((prev) => {
+                  const allDone = prev.map((s) => ({ ...s, done: true }));
+                  return [
+                    ...allDone,
+                    {
+                      agent: ev.agent,
+                      status: toUserStatus(ev.agent, ev.status),
+                      done: false,
+                    },
+                  ];
+                });
               }
             } catch {}
           }
@@ -109,23 +229,75 @@ function ResearchContent() {
     return <p className="text-gray-400 text-center mt-20">No query provided.</p>;
   }
 
+  const doneCount = steps.filter((s) => s.done).length;
+  const totalCount = steps.length;
+  const activeIdx = running ? steps.length - 1 : -1;
+
   return (
     <div className="max-w-3xl mx-auto w-full px-6 py-10 space-y-8">
+      {/* Query header */}
       <div>
-        <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">Query</p>
+        <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">Research query</p>
         <h1 className="text-2xl font-semibold text-white">{query}</h1>
       </div>
 
-      {/* Agent progress */}
-      <div className="space-y-3 bg-gray-900 rounded-xl p-5 border border-gray-800">
-        <p className="text-xs uppercase tracking-widest text-gray-500 mb-3">Pipeline</p>
-        {events.map((ev, i) => (
-          <AgentStep key={i} event={ev} isLatest={running && i === events.length - 1} />
-        ))}
-        {running && events.length === 0 && (
-          <p className="text-sm text-gray-500 animate-pulse">Starting pipeline…</p>
-        )}
-        {error && <p className="text-sm text-red-400">Error: {error}</p>}
+      {/* Progress card */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+        {/* Card header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-2.5">
+            {running && <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />}
+            {!running && report !== null && <span className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />}
+            {!running && report === null && !error && <span className="w-2 h-2 rounded-full bg-gray-600 flex-shrink-0" />}
+            <span className="text-sm font-medium text-gray-200">
+              {running
+                ? "Researching your question…"
+                : report !== null
+                ? "Research complete"
+                : error
+                ? "Research stopped"
+                : "Starting…"}
+            </span>
+          </div>
+          {totalCount > 0 && (
+            <span className="text-xs text-gray-500 tabular-nums">
+              {doneCount} / {totalCount} steps
+            </span>
+          )}
+        </div>
+
+        {/* Steps */}
+        <div className="px-5 pt-5">
+          {steps.length === 0 && running && (
+            <div className="flex items-center gap-4 pb-6">
+              <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
+                <span className="block w-2.5 h-2.5 rounded-full bg-white animate-ping" />
+              </div>
+              <span className="text-sm text-gray-400 animate-pulse">Starting research…</span>
+            </div>
+          )}
+
+          {steps.map((step, i) => (
+            <StepItem
+              key={`${step.agent}-${i}`}
+              step={step}
+              isActive={i === activeIdx}
+              isLast={i === steps.length - 1}
+            />
+          ))}
+
+          {error && (
+            <div className="flex items-start gap-4 pb-6">
+              <div className="w-8 h-8 rounded-full bg-red-950 border border-red-800 flex items-center justify-center flex-shrink-0 text-red-400 font-bold">
+                !
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-red-400">Something went wrong</p>
+                <p className="text-xs text-gray-500 mt-0.5">{error}</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Report */}
