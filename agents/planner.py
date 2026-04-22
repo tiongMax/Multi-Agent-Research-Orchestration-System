@@ -4,7 +4,10 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from core.logger import get_logger
 from graph.state import ResearchState
+
+log = get_logger(__name__)
 
 load_dotenv()
 
@@ -27,6 +30,7 @@ def _text(content) -> str:
 
 
 def run_planner(state: ResearchState) -> dict:
+    log.info('Planning: "%s"', state["query"])
     response = _llm.invoke([
         SystemMessage(content=_SYSTEM),
         HumanMessage(content=f"Query: {state['query']}"),
@@ -38,6 +42,10 @@ def run_planner(state: ResearchState) -> dict:
         cleaned = re.sub(r"^\d+[.)]\s*", "", line)
         if cleaned:
             sub_questions.append(cleaned)
+
+    log.info("Generated %d sub-questions", len(sub_questions))
+    for i, q in enumerate(sub_questions, 1):
+        log.debug("  %d. %s", i, q)
 
     return {
         "sub_questions": sub_questions,

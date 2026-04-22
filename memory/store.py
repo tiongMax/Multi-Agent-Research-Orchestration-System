@@ -3,7 +3,10 @@ import psycopg2
 from pgvector.psycopg2 import register_vector
 from dotenv import load_dotenv
 
+from core.logger import get_logger
 from memory.embeddings import embed_text
+
+log = get_logger(__name__)
 
 load_dotenv()
 
@@ -19,6 +22,7 @@ def _connect():
 
 def retrieve_similar(query: str) -> list[str]:
     """Return facts from past research whose query embedding is close to this one."""
+    log.info("Checking memory for similar past research")
     try:
         embedding = embed_text(query)
         conn = _connect()
@@ -42,9 +46,14 @@ def retrieve_similar(query: str) -> list[str]:
         for (facts,) in rows:
             if facts:
                 hits.extend(facts)
+
+        if hits:
+            log.info("Found %d fact(s) from past research", len(hits))
+        else:
+            log.info("No relevant past research found")
         return hits
-    except Exception:
-        # DB unavailable during local dev — degrade gracefully
+    except Exception as e:
+        log.warning("Memory retrieve unavailable (DB down?): %s", e)
         return []
 
 
@@ -55,6 +64,7 @@ def save_research(
     report: str,
 ) -> None:
     """Persist a completed research session to the vector store."""
+    log.info("Saving research to memory")
     try:
         embedding = embed_text(query)
         conn = _connect()
@@ -70,5 +80,6 @@ def save_research(
             conn.commit()
         finally:
             conn.close()
-    except Exception:
-        pass  # Never let a memory write crash the pipeline
+        log.info("Research saved successfully")
+    except Exception as e:
+        log.warning("Memory save failed (DB down?): %s", e)

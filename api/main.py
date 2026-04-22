@@ -9,8 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from api.schemas import HistoryItem, ResearchRequest, ResearchResponse
+from core.logger import get_logger
 from graph.orchestrator import graph, run
 from graph.state import ResearchState
+
+log = get_logger(__name__)
 
 app = FastAPI(title="Multi-Agent Research System")
 
@@ -78,6 +81,7 @@ def _make_event(node: str, output: dict) -> dict:
 @app.post("/research", response_model=ResearchResponse)
 async def research(request: ResearchRequest) -> ResearchResponse:
     """Run the full pipeline and return the completed report."""
+    log.info('POST /research query="%s"', request.query)
     result = await asyncio.to_thread(run, request.query)
     return ResearchResponse(
         query=result["query"],
@@ -92,6 +96,7 @@ async def research(request: ResearchRequest) -> ResearchResponse:
 @app.get("/research/history", response_model=list[HistoryItem])
 async def research_history(limit: int = 20) -> list[HistoryItem]:
     """Return the most recent research sessions from the vector store."""
+    log.info("GET /research/history limit=%d", limit)
     try:
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         try:
@@ -119,13 +124,15 @@ async def research_history(limit: int = 20) -> list[HistoryItem]:
             )
             for row in rows
         ]
-    except Exception:
+    except Exception as e:
+        log.warning("History query failed: %s", e)
         return []
 
 
 @app.post("/research/stream")
 async def research_stream(request: ResearchRequest) -> EventSourceResponse:
     """Stream agent progress in real-time via Server-Sent Events."""
+    log.info('POST /research/stream query="%s"', request.query)
 
     async def event_generator():
         loop = asyncio.get_event_loop()
@@ -151,8 +158,11 @@ async def research_stream(request: ResearchRequest) -> EventSourceResponse:
             node, output = item
             if node == "writer":
                 final_report = output.get("final_report", "")
-            yield {"data": json.dumps(_make_event(node, output))}
+            ev = _make_event(node, output)
+            log.debug("SSE event: node=%s status=%s", node, ev.get("status", ""))
+            yield {"data": json.dumps(ev)}
 
+        log.info('Stream complete for query="%s"', request.query)
         yield {"data": json.dumps({"agent": "complete", "report": final_report})}
 
     return EventSourceResponse(event_generator())

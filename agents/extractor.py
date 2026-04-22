@@ -4,7 +4,10 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from core.logger import get_logger
 from graph.state import ResearchState
+
+log = get_logger(__name__)
 
 load_dotenv()
 
@@ -38,8 +41,11 @@ def run_extractor(state: ResearchState) -> dict:
     all_facts = list(state.get("memory_hits", []))
     errors = list(state.get("errors", []))
 
+    log.info("Extracting facts from %d sub-questions", len(search_results))
+
     for sub_question, results in search_results.items():
         if not results:
+            log.debug('No results for "%s", skipping', sub_question)
             continue
 
         context_parts = []
@@ -56,6 +62,7 @@ def run_extractor(state: ResearchState) -> dict:
             + "\n\n---\n\n".join(context_parts)
         )
 
+        before = len(all_facts)
         try:
             response = _llm.invoke([
                 SystemMessage(content=_SYSTEM),
@@ -65,8 +72,12 @@ def run_extractor(state: ResearchState) -> dict:
                 fact = re.sub(r"^\d+[.)]\s*", "", line.strip())
                 if fact:
                     all_facts.append(fact)
+            log.debug('"%s" → %d facts', sub_question, len(all_facts) - before)
         except Exception as e:
+            log.error('Extraction failed for "%s": %s', sub_question, e)
             errors.append(f"Extractor failed for '{sub_question}': {e}")
+
+    log.info("Total: %d facts extracted", len(all_facts))
 
     return {
         "extracted_facts": all_facts,
