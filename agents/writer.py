@@ -3,7 +3,10 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from core.logger import get_logger
 from graph.state import ResearchState
+
+log = get_logger(__name__)
 
 load_dotenv()
 
@@ -31,7 +34,10 @@ def _text(content) -> str:
 
 
 def run_writer(state: ResearchState) -> dict:
-    facts_text = "\n".join(f"- {f}" for f in state["extracted_facts"])
+    facts = state["extracted_facts"]
+    log.info("Writing report from %d facts", len(facts))
+
+    facts_text = "\n".join(f"- {f}" for f in facts)
     prompt = (
         f"Query: {state['query']}\n\n"
         f"Extracted facts:\n{facts_text}\n\n"
@@ -45,7 +51,9 @@ def run_writer(state: ResearchState) -> dict:
             HumanMessage(content=prompt),
         ])
         final_report = _text(response.content).strip()
+        log.info("Report generated (%d chars)", len(final_report))
     except Exception as e:
+        log.error("Writer LLM failed: %s", e)
         errors.append(f"Writer failed: {e}")
         final_report = "Report generation failed. Please retry."
 

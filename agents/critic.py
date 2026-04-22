@@ -3,8 +3,11 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from core.logger import get_logger
 from graph.state import ResearchState
 from tools.cross_reference import find_contradictions
+
+log = get_logger(__name__)
 
 load_dotenv()
 
@@ -35,9 +38,12 @@ def run_critic(state: ResearchState) -> dict:
     facts = state["extracted_facts"]
     errors = list(state.get("errors", []))
 
+    log.info("Evaluating %d facts", len(facts))
+
     contradictions = find_contradictions(facts)
     contradiction_text = ""
     if contradictions:
+        log.warning("Detected %d potential contradiction(s)", len(contradictions))
         pairs = "\n".join(f"  • '{a}' vs '{b}'" for a, b in contradictions[:3])
         contradiction_text = f"\n\nDetected potential contradictions:\n{pairs}"
 
@@ -55,8 +61,14 @@ def run_critic(state: ResearchState) -> dict:
         ])
         critique = _text(response.content).strip()
     except Exception as e:
+        log.error("Critic LLM failed, defaulting to GOOD: %s", e)
         errors.append(f"Critic failed: {e}")
         critique = "VERDICT: GOOD"  # graceful degradation
+
+    if "VERDICT: GOOD" in critique:
+        log.info("Verdict: GOOD — proceeding to write report")
+    else:
+        log.warning("Verdict: POOR — research will be reworked")
 
     return {
         "critique": critique,

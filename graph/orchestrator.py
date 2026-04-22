@@ -5,24 +5,26 @@ from agents.researcher import run_researcher
 from agents.extractor import run_extractor
 from agents.critic import run_critic
 from agents.writer import run_writer
+from core.logger import get_logger
 from graph.edges import route_after_critic
 from graph.state import ResearchState
 from memory.store import retrieve_similar, save_research
 
+log = get_logger(__name__)
+
 
 def _rework(state: ResearchState) -> dict:
-    """Increment retry counter before looping back to researcher."""
-    return {"retry_count": state.get("retry_count", 0) + 1}
+    attempt = state.get("retry_count", 0) + 1
+    log.warning("Rework triggered — attempt %d", attempt)
+    return {"retry_count": attempt}
 
 
 def _memory_retrieve(state: ResearchState) -> dict:
-    """Fetch facts from past similar queries and inject them as memory_hits."""
     hits = retrieve_similar(state["query"])
     return {"memory_hits": hits, "current_step": "memory_retrieved"}
 
 
 def _memory_save(state: ResearchState) -> dict:
-    """Persist the completed research session to the vector store."""
     save_research(
         query=state["query"],
         sub_questions=state.get("sub_questions", []),
@@ -66,6 +68,7 @@ graph = build_graph()
 
 def run(query: str) -> ResearchState:
     """Convenience entry point for running the full pipeline."""
+    log.info('── Pipeline start: "%s"', query)
     initial: ResearchState = {
         "query": query,
         "sub_questions": [],
@@ -78,4 +81,16 @@ def run(query: str) -> ResearchState:
         "errors": [],
         "memory_hits": [],
     }
-    return graph.invoke(initial)
+    result = graph.invoke(initial)
+    retries = result.get("retry_count", 0)
+    errors = result.get("errors", [])
+    log.info(
+        "── Pipeline complete (retries=%d, facts=%d, errors=%d)",
+        retries,
+        len(result.get("extracted_facts", [])),
+        len(errors),
+    )
+    if errors:
+        for err in errors:
+            log.warning("Pipeline error recorded: %s", err)
+    return result
