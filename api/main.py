@@ -40,6 +40,15 @@ def _build_initial(query: str) -> ResearchState:
     }
 
 
+def _error_kind(exc: Exception) -> str:
+    msg = str(exc)
+    if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
+        return "rate_limit"
+    if "timeout" in msg.lower() or "timed out" in msg.lower():
+        return "timeout"
+    return "unknown"
+
+
 def _make_event(node: str, output: dict) -> dict:
     """Map a node update to a human-readable SSE payload."""
     if node == "planner":
@@ -145,24 +154,35 @@ async def research_stream(request: ResearchRequest) -> EventSourceResponse:
                 ):
                     for node, output in event.items():
                         loop.call_soon_threadsafe(queue.put_nowait, (node, output))
-            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+            except Exception as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, ("__error__", exc))
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
         threading.Thread(target=run_graph, daemon=True).start()
 
         final_report = ""
+        had_error = False
         while True:
             item = await queue.get()
             if item is None:
                 break
             node, output = item
+            if node == "__error__":
+                had_error = True
+                log.error("Pipeline failed: %s", output)
+                yield {"data": json.dumps({"agent": "error", "kind": _error_kind(output)})}
+                continue
             if node == "writer":
                 final_report = output.get("final_report", "")
             ev = _make_event(node, output)
             log.debug("SSE event: node=%s status=%s", node, ev.get("status", ""))
             yield {"data": json.dumps(ev)}
 
-        log.info('Stream complete for query="%s"', request.query)
-        yield {"data": json.dumps({"agent": "complete", "report": final_report})}
+        if had_error:
+            log.error('Stream failed for query="%s"', request.query)
+        else:
+            log.info('Stream complete for query="%s"', request.query)
+            yield {"data": json.dumps({"agent": "complete", "report": final_report})}
 
     return EventSourceResponse(event_generator())
