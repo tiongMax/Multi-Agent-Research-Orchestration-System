@@ -8,7 +8,7 @@ from graph.state import ResearchState
 load_dotenv()
 
 _llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
+    model="gemini-3-flash-preview",
     google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.4,
 )
@@ -22,6 +22,12 @@ write a comprehensive research report that:
 - Closes with a concise conclusion
 - Is 400–600 words
 - Uses markdown formatting throughout"""
+
+
+def _text(content) -> str:
+    if isinstance(content, list):
+        return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
+    return content
 
 
 def run_writer(state: ResearchState) -> dict:
@@ -38,7 +44,7 @@ def run_writer(state: ResearchState) -> dict:
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=prompt),
         ])
-        final_report = response.content.strip()
+        final_report = _text(response.content).strip()
     except Exception as e:
         errors.append(f"Writer failed: {e}")
         final_report = "Report generation failed. Please retry."
