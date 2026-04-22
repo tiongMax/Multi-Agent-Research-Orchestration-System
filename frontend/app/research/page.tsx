@@ -89,14 +89,32 @@ function CheckIcon() {
   );
 }
 
+function StopIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+    </svg>
+  );
+}
+
+function RetryIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  );
+}
+
 function StepItem({
   step,
   isActive,
   isLast,
+  isStopped,
 }: {
   step: Step;
   isActive: boolean;
   isLast: boolean;
+  isStopped: boolean;
 }) {
   const meta = AGENT_META[step.agent];
   if (!meta) return null;
@@ -109,6 +127,8 @@ function StepItem({
           className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors duration-300
             ${step.done
               ? "bg-emerald-600 text-white"
+              : isStopped
+              ? "bg-amber-950 border border-amber-800 text-amber-400"
               : isActive
               ? "bg-blue-500 text-white"
               : "bg-gray-800 border border-gray-700 text-gray-500"
@@ -116,6 +136,8 @@ function StepItem({
         >
           {step.done ? (
             <CheckIcon />
+          ) : isStopped ? (
+            <StopIcon />
           ) : isActive ? (
             <span className="block w-2.5 h-2.5 rounded-full bg-white animate-ping" />
           ) : (
@@ -131,11 +153,11 @@ function StepItem({
       </div>
 
       {/* Text */}
-      <div className={`pb-6 min-w-0 transition-opacity duration-300 ${!isActive && !step.done ? "opacity-35" : ""}`}>
+      <div className={`pb-6 min-w-0 transition-opacity duration-300 ${!isActive && !step.done && !isStopped ? "opacity-35" : ""}`}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span
             className={`text-sm font-semibold ${
-              step.done ? "text-gray-200" : isActive ? "text-white" : "text-gray-500"
+              step.done ? "text-gray-200" : isStopped ? "text-amber-400" : isActive ? "text-white" : "text-gray-500"
             }`}
           >
             {meta.label}
@@ -145,6 +167,9 @@ function StepItem({
           )}
           {isActive && (
             <span className="text-xs text-blue-400 animate-pulse">In progress…</span>
+          )}
+          {isStopped && (
+            <span className="text-xs text-amber-600">Stopped</span>
           )}
         </div>
         <p className={`text-xs mt-0.5 leading-relaxed ${isActive ? "text-gray-300" : "text-gray-500"}`}>
@@ -176,14 +201,28 @@ function ResearchContent() {
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const started = useRef(false);
+  const [stopped, setStopped] = useState(false);
+  const [runCount, setRunCount] = useState(0);
+
+  const controllerRef = useRef<AbortController | null>(null);
+  const stoppedByUserRef = useRef(false);
+  // Prevents double-invoke on initial mount (React StrictMode)
+  const initialStarted = useRef(false);
 
   useEffect(() => {
-    if (!query || started.current) return;
-    started.current = true;
+    if (!query) return;
+    if (runCount === 0 && initialStarted.current) return;
+    initialStarted.current = true;
+
+    stoppedByUserRef.current = false;
+    setSteps([]);
+    setReport(null);
+    setError(null);
+    setStopped(false);
     setRunning(true);
 
     const controller = new AbortController();
+    controllerRef.current = controller;
 
     (async () => {
       try {
@@ -236,15 +275,27 @@ function ResearchContent() {
           }
         }
       } catch (e: unknown) {
-        if (e instanceof Error && e.name !== "AbortError") {
-          setError(e.message);
+        if (e instanceof Error && e.name === "AbortError") {
+          if (stoppedByUserRef.current) setStopped(true);
+          // else: cleanup abort on unmount/re-run — ignore
+        } else {
+          setError(e instanceof Error ? e.message : "Something went wrong.");
         }
         setRunning(false);
       }
     })();
 
     return () => controller.abort();
-  }, [query]);
+  }, [query, runCount]);
+
+  function handleStop() {
+    stoppedByUserRef.current = true;
+    controllerRef.current?.abort();
+  }
+
+  function handleRetry() {
+    setRunCount((c) => c + 1);
+  }
 
   if (!query) {
     return <p className="text-gray-400 text-center mt-20">No query provided.</p>;
@@ -253,6 +304,8 @@ function ResearchContent() {
   const doneCount = steps.filter((s) => s.done).length;
   const totalCount = steps.length;
   const activeIdx = running ? steps.length - 1 : -1;
+  const stoppedIdx = stopped && !running ? steps.length - 1 : -1;
+  const showRetry = (stopped || error !== null) && !running;
 
   return (
     <div className="max-w-3xl mx-auto w-full px-6 py-10 space-y-8">
@@ -269,22 +322,46 @@ function ResearchContent() {
           <div className="flex items-center gap-2.5">
             {running && <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />}
             {!running && report !== null && <span className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />}
-            {!running && report === null && !error && <span className="w-2 h-2 rounded-full bg-gray-600 flex-shrink-0" />}
+            {!running && stopped && <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />}
+            {!running && error !== null && <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />}
             <span className="text-sm font-medium text-gray-200">
               {running
                 ? "Researching your question…"
                 : report !== null
                 ? "Research complete"
-                : error
+                : stopped
                 ? "Research stopped"
+                : error
+                ? "Something went wrong"
                 : "Starting…"}
             </span>
           </div>
-          {totalCount > 0 && (
-            <span className="text-xs text-gray-500 tabular-nums">
-              {doneCount} / {totalCount} steps
-            </span>
-          )}
+
+          <div className="flex items-center gap-3">
+            {totalCount > 0 && (
+              <span className="text-xs text-gray-500 tabular-nums">
+                {doneCount} / {totalCount} steps
+              </span>
+            )}
+            {running && (
+              <button
+                onClick={handleStop}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-red-950 border border-gray-700 hover:border-red-800 text-gray-400 hover:text-red-400 transition-colors"
+              >
+                <StopIcon />
+                Stop
+              </button>
+            )}
+            {showRetry && (
+              <button
+                onClick={handleRetry}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 transition-colors"
+              >
+                <RetryIcon />
+                Try again
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Steps */}
@@ -304,6 +381,7 @@ function ResearchContent() {
               step={step}
               isActive={i === activeIdx}
               isLast={i === steps.length - 1}
+              isStopped={i === stoppedIdx}
             />
           ))}
 
