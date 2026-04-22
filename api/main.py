@@ -1,15 +1,25 @@
 import asyncio
 import json
+import os
 import threading
 
+import psycopg2
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
-from api.schemas import ResearchRequest, ResearchResponse
+from api.schemas import HistoryItem, ResearchRequest, ResearchResponse
 from graph.orchestrator import graph, run
 from graph.state import ResearchState
 
 app = FastAPI(title="Multi-Agent Research System")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _build_initial(query: str) -> ResearchState:
@@ -54,7 +64,11 @@ def _make_event(node: str, output: dict) -> dict:
         status = node
 
     event: dict = {"agent": node, "status": status}
-    if node == "writer":
+    if node == "planner":
+        event["details"] = output.get("sub_questions", [])
+    elif node == "extractor":
+        event["details"] = output.get("extracted_facts", [])[:4]
+    elif node == "writer":
         event["report"] = output.get("final_report", "")
     return event
 
@@ -73,6 +87,40 @@ async def research(request: ResearchRequest) -> ResearchResponse:
         errors=result.get("errors", []),
         retry_count=result.get("retry_count", 0),
     )
+
+
+@app.get("/research/history", response_model=list[HistoryItem])
+async def research_history(limit: int = 20) -> list[HistoryItem]:
+    """Return the most recent research sessions from the vector store."""
+    try:
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, query, report, sub_questions, facts, created_at
+                    FROM research_memory
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+        return [
+            HistoryItem(
+                id=row[0],
+                query=row[1],
+                report=row[2] or "",
+                sub_questions=row[3] or [],
+                facts=row[4] or [],
+                created_at=row[5],
+            )
+            for row in rows
+        ]
+    except Exception:
+        return []
 
 
 @app.post("/research/stream")
