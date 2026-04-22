@@ -10,12 +10,19 @@ type AgentEvent = {
   agent: string;
   status: string;
   report?: string;
+  details?: string[];
 };
 
 type Step = {
   agent: string;
   status: string;
+  details?: string[];
   done: boolean;
+};
+
+const AGENT_DETAIL_LABEL: Record<string, string> = {
+  planner: "Topics to explore",
+  extractor: "Key findings",
 };
 
 const AGENT_META: Record<string, { label: string; description: string }> = {
@@ -143,6 +150,19 @@ function StepItem({
         <p className={`text-xs mt-0.5 leading-relaxed ${isActive ? "text-gray-300" : "text-gray-500"}`}>
           {meta.description}
         </p>
+        {step.done && step.details && step.details.length > 0 && (
+          <div className="mt-2">
+            <p className="text-xs text-gray-500 mb-1">{AGENT_DETAIL_LABEL[step.agent]}</p>
+            <ul className="space-y-1">
+              {step.details.map((item, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-xs text-gray-400">
+                  <span className="mt-1 w-1 h-1 rounded-full bg-gray-600 flex-shrink-0" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -206,6 +226,7 @@ function ResearchContent() {
                     {
                       agent: ev.agent,
                       status: toUserStatus(ev.agent, ev.status),
+                      details: ev.details,
                       done: false,
                     },
                   ];

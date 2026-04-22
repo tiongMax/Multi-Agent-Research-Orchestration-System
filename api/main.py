@@ -64,7 +64,11 @@ def _make_event(node: str, output: dict) -> dict:
         status = node
 
     event: dict = {"agent": node, "status": status}
-    if node == "writer":
+    if node == "planner":
+        event["details"] = output.get("sub_questions", [])
+    elif node == "extractor":
+        event["details"] = output.get("extracted_facts", [])[:4]
+    elif node == "writer":
         event["report"] = output.get("final_report", "")
     return event
 
