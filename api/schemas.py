@@ -1,1 +1,14 @@
-# Phase 6 — implement request/response Pydantic models
+from pydantic import BaseModel
+
+
+class ResearchRequest(BaseModel):
+    query: str
+
+
+class ResearchResponse(BaseModel):
+    query: str
+    report: str
+    sub_questions: list[str]
+    extracted_facts: list[str]
+    errors: list[str]
+    retry_count: int

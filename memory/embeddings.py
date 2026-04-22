@@ -1,17 +1,18 @@
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-_MODEL = "models/text-embedding-004"
+_MODEL = "text-embedding-004"
 
 
 def embed_text(text: str) -> list[float]:
-    result = genai.embed_content(
+    result = _client.models.embed_content(
         model=_MODEL,
-        content=text,
-        task_type="retrieval_document",
+        contents=text,
+        config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
     )
-    return result["embedding"]
+    return result.embeddings[0].values
