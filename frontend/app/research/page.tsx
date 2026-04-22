@@ -11,6 +11,13 @@ type AgentEvent = {
   status: string;
   report?: string;
   details?: string[];
+  kind?: string;
+};
+
+const SSE_ERROR_MESSAGES: Record<string, string> = {
+  rate_limit: "The AI service is temporarily rate-limited. Please wait a minute and try again.",
+  timeout: "The research took too long to complete. Please try again.",
+  unknown: "Research failed unexpectedly. Please try again.",
 };
 
 type Step = {
@@ -257,6 +264,11 @@ function ResearchContent() {
                 setSteps((prev) =>
                   prev.map((s, i) => (i === prev.length - 1 ? { ...s, done: true } : s))
                 );
+              } else if (ev.agent === "error") {
+                const msg = SSE_ERROR_MESSAGES[ev.kind ?? "unknown"] ?? SSE_ERROR_MESSAGES.unknown;
+                setError(msg);
+                setStopped(true);
+                setRunning(false);
               } else if (AGENT_META[ev.agent]) {
                 setSteps((prev) => {
                   const allDone = prev.map((s) => ({ ...s, done: true }));
@@ -304,7 +316,7 @@ function ResearchContent() {
   const doneCount = steps.filter((s) => s.done).length;
   const totalCount = steps.length;
   const activeIdx = running ? steps.length - 1 : -1;
-  const stoppedIdx = stopped && !running ? steps.length - 1 : -1;
+  const stoppedIdx = (stopped || error !== null) && !running ? steps.length - 1 : -1;
   const showRetry = (stopped || error !== null) && !running;
 
   return (
